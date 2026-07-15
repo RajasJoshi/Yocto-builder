@@ -32,6 +32,7 @@ jobs:
       - name: Build core-image-minimal
         run: |
           UV="${{ inputs.ubuntu || '22.04' }}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:ubuntu-$UV"
           mkdir -p work dl sstate
           docker run --rm \
             -u "$(id -u):$(id -g)" \
@@ -39,9 +40,9 @@ jobs:
             -v "$PWD/dl:/downloads" \
             -v "$PWD/sstate:/sstate" \
             -w /workdir \
-            ghcr.io/${{ github.repository }}:ubuntu-$UV -c '
+            "$IMAGE" -c '
               set -euo pipefail
-              git clone -b scarthgap --depth 1 git://git.yoctoproject.org/poky
+              git clone -b scarthgap --depth 1 https://git.yoctoproject.org/poky
               cd poky
               source oe-init-build-env build
               echo "DL_DIR = \"/downloads\"" >> conf/local.conf

@@ -10,7 +10,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   versions:
@@ -18,6 +17,7 @@ jobs:
     outputs:
       ubuntu: ${{ steps.load.outputs.ubuntu }}
       kas: ${{ steps.load.outputs.kas }}
+      image: ${{ steps.load.outputs.image }}
     steps:
       - uses: actions/checkout@v4
       - id: load
@@ -25,6 +25,7 @@ jobs:
           set -a; source versions.env; set +a
           echo "ubuntu=$(jq -cRn '$v | split(",")' --arg v "$UBUNTU_VERSIONS")" >> "$GITHUB_OUTPUT"
           echo "kas=$KAS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "image=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: versions
@@ -51,7 +52,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ needs.versions.outputs.image }}
           tags: |
             type=raw,value=ubuntu-${{ matrix.ubuntu }}
             type=raw,value=ubuntu-${{ matrix.ubuntu }}-{{sha}}
@@ -83,8 +84,6 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v7
-
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -93,14 +92,14 @@ jobs:
 
       - name: Smoke test
         run: |
-          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ubuntu-${{ matrix.ubuntu }}
+          IMAGE=${{ env.REGISTRY }}/${{ needs.versions.outputs.image }}:ubuntu-${{ matrix.ubuntu }}
           docker run --rm "$IMAGE" -c '
             set -euo pipefail
             echo "user: $(id -un) uid: $(id -u)"
             [ "$(id -u)" -ne 0 ] || { echo "FAIL: running as root"; exit 1; }
-            command -v kas    >/dev/null || { echo "FAIL: kas not on PATH"; exit 1; }
+            command -v kas     >/dev/null || { echo "FAIL: kas not on PATH"; exit 1; }
             command -v python3 >/dev/null || { echo "FAIL: no python3"; exit 1; }
-            command -v git    >/dev/null || { echo "FAIL: no git"; exit 1; }
+            command -v git     >/dev/null || { echo "FAIL: no git"; exit 1; }
             kas --version
             python3 --version
             git --version

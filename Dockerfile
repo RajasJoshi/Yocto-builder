@@ -12,6 +12,9 @@ ARG GID=1000
 
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries \
+ && echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80retries
+
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
@@ -50,7 +53,9 @@ RUN groupadd -g $GID $USERNAME \
  && mkdir -p /workdir /downloads /sstate \
  && chown $UID:$GID /workdir /downloads /sstate
 
+LABEL org.opencontainers.image.source="https://github.com/RajasJoshi/Yocto-builder"
 LABEL org.opencontainers.image.description="Yocto build environment (Ubuntu ${UBUNTU_VERSION}, kas ${KAS_VERSION})"
+LABEL org.opencontainers.image.licenses="MIT"
 
 USER $USERNAME
 WORKDIR /workdir

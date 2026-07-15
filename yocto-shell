@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$SCRIPT_DIR/versions.env" ]] && { set -a; source "$SCRIPT_DIR/versions.env"; set +a; }
 
-IMAGE="${YOCTO_IMAGE:-ghcr.io/youruser/yocto-container}"
+IMAGE="${YOCTO_IMAGE:-ghcr.io/rajasjoshi/yocto-builder}"
 VERSION="${YOCTO_UBUNTU:-${DEFAULT_UBUNTU:-22.04}}"
 WORKDIR="${YOCTO_WORKDIR:-$PWD}"
 CACHE="${YOCTO_CACHE:-$HOME/.yocto-cache}"
