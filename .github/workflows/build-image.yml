@@ -19,7 +19,7 @@ jobs:
       kas: ${{ steps.load.outputs.kas }}
       image: ${{ steps.load.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: load
         run: |
           set -a; source versions.env; set +a
@@ -38,7 +38,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
