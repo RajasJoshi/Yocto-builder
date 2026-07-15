@@ -28,9 +28,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # 24.04+ ships a stock 'ubuntu' user squatting on UID 1000
 RUN if id -u ubuntu >/dev/null 2>&1 && [ "$(id -u ubuntu)" = "1000" ]; then \
-      touch /var/mail/ubuntu 2>/dev/null || true; \
-      userdel -r ubuntu 2>/dev/null || userdel ubuntu; \
-    fi
+      userdel -r ubuntu 2>/dev/null || true; \
+    fi; \
+    ! id -u ubuntu >/dev/null 2>&1
 
 # PEP 668 blocks system pip installs from 24.04 onward
 RUN PIP_FLAGS=""; \
