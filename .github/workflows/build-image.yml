@@ -1,0 +1,112 @@
+name: build-image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      ubuntu: ${{ steps.load.outputs.ubuntu }}
+      kas: ${{ steps.load.outputs.kas }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: load
+        run: |
+          set -a; source versions.env; set +a
+          echo "ubuntu=$(jq -cRn '$v | split(",")' --arg v "$UBUNTU_VERSIONS")" >> "$GITHUB_OUTPUT"
+          echo "kas=$KAS_VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: versions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ${{ fromJSON(needs.versions.outputs.ubuntu) }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=ubuntu-${{ matrix.ubuntu }}
+            type=raw,value=ubuntu-${{ matrix.ubuntu }}-{{sha}}
+            type=raw,value=latest,enable=${{ matrix.ubuntu == '22.04' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          build-args: |
+            UBUNTU_VERSION=${{ matrix.ubuntu }}
+            KAS_VERSION=${{ needs.versions.outputs.kas }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=ubuntu-${{ matrix.ubuntu }}
+          cache-to: type=gha,mode=max,scope=ubuntu-${{ matrix.ubuntu }}
+
+  smoke:
+    needs: [versions, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ${{ fromJSON(needs.versions.outputs.ubuntu) }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ubuntu-${{ matrix.ubuntu }}
+          docker run --rm "$IMAGE" -c '
+            set -euo pipefail
+            echo "user: $(id -un) uid: $(id -u)"
+            [ "$(id -u)" -ne 0 ] || { echo "FAIL: running as root"; exit 1; }
+            command -v kas    >/dev/null || { echo "FAIL: kas not on PATH"; exit 1; }
+            command -v python3 >/dev/null || { echo "FAIL: no python3"; exit 1; }
+            command -v git    >/dev/null || { echo "FAIL: no git"; exit 1; }
+            kas --version
+            python3 --version
+            git --version
+            locale | grep -q "LANG=en_US.UTF-8" || { echo "FAIL: locale"; exit 1; }
+            [ -w /workdir ] || { echo "FAIL: /workdir not writable"; exit 1; }
+            echo "OK"
+          '

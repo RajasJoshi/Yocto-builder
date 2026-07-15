@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$SCRIPT_DIR/versions.env" ]] && { set -a; source "$SCRIPT_DIR/versions.env"; set +a; }
+
+IMAGE="${YOCTO_IMAGE:-ghcr.io/youruser/yocto-container}"
+VERSION="${YOCTO_UBUNTU:-${DEFAULT_UBUNTU:-22.04}}"
+WORKDIR="${YOCTO_WORKDIR:-$PWD}"
+CACHE="${YOCTO_CACHE:-$HOME/.yocto-cache}"
+PULL=0
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [-u VERSION] [-w DIR] [-c DIR] [-p] [-- CMD...]
+
+  -u VERSION   Ubuntu version (default: $VERSION)
+  -w DIR       Work directory mounted at /workdir (default: cwd)
+  -c DIR       Cache dir for downloads/sstate (default: \$HOME/.yocto-cache)
+  -p           Pull latest image before running
+  -h           Show this help
+
+Env overrides: YOCTO_IMAGE, YOCTO_UBUNTU, YOCTO_WORKDIR, YOCTO_CACHE
+
+Proxy vars (http_proxy, https_proxy, no_proxy, ftp_proxy) are forwarded
+automatically when set.
+
+Examples:
+  $(basename "$0") -u 24.04
+  $(basename "$0") -w ~/projects/bsp -u 20.04
+  $(basename "$0") -- kas build kas-project.yml
+EOF
+}
+
+while getopts ":u:w:c:ph" opt; do
+  case "$opt" in
+    u) VERSION="$OPTARG" ;;
+    w) WORKDIR="$OPTARG" ;;
+    c) CACHE="$OPTARG" ;;
+    p) PULL=1 ;;
+    h) usage; exit 0 ;;
+    :) echo "Error: -$OPTARG requires an argument" >&2; exit 1 ;;
+    \?) echo "Error: unknown option -$OPTARG" >&2; usage >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+command -v docker >/dev/null || { echo "Error: docker not found" >&2; exit 1; }
+[[ -d "$WORKDIR" ]] || { echo "Error: work dir not found: $WORKDIR" >&2; exit 1; }
+WORKDIR="$(cd "$WORKDIR" && pwd)"
+
+mkdir -p "$CACHE/downloads" "$CACHE/sstate"
+CACHE="$(cd "$CACHE" && pwd)"
+
+TAG="$IMAGE:ubuntu-$VERSION"
+[[ $PULL -eq 1 ]] && docker pull "$TAG"
+
+PROXY_ARGS=()
+for v in http_proxy https_proxy ftp_proxy no_proxy \
+         HTTP_PROXY HTTPS_PROXY FTP_PROXY NO_PROXY; do
+  [[ -n "${!v:-}" ]] && PROXY_ARGS+=(-e "$v=${!v}")
+done
+
+TTY_ARGS=()
+[[ -t 0 && -t 1 ]] && TTY_ARGS+=(-it)
+
+exec docker run --rm "${TTY_ARGS[@]}" \
+  -u "$(id -u):$(id -g)" \
+  -v "$WORKDIR:/workdir" \
+  -v "$CACHE/downloads:/downloads" \
+  -v "$CACHE/sstate:/sstate" \
+  -e DL_DIR=/downloads \
+  -e SSTATE_DIR=/sstate \
+  -e BB_ENV_PASSTHROUGH_ADDITIONS="DL_DIR SSTATE_DIR http_proxy https_proxy ftp_proxy no_proxy" \
+  "${PROXY_ARGS[@]}" \
+  -w /workdir \
+  "$TAG" "$@"

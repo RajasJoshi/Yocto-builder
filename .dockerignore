@@ -1,0 +1,8 @@
+.git
+.github
+build/
+tmp/
+downloads/
+sstate-cache/
+*.log
+README.md
