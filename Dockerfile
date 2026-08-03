@@ -35,12 +35,20 @@ RUN if id -u ubuntu >/dev/null 2>&1 && [ "$(id -u ubuntu)" = "1000" ]; then \
     fi; \
     ! id -u ubuntu >/dev/null 2>&1
 
-# PEP 668 blocks system pip installs from 24.04 onward
-RUN PIP_FLAGS=""; \
+# kas 4.x needs Python 3.8+; 18.04 ships 3.6, so pin kas 2.x there.
+# pip<21 because pip 21+ drops Python 3.6 support.
+# PEP 668 blocks system pip installs from 24.04 (Python 3.11+) onward.
+RUN PY_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)'); \
+    KV="${KAS_VERSION}"; \
+    if [ "$PY_MINOR" -lt 8 ]; then \
+      KV="2.6.3"; \
+      python3 -m pip install --no-cache-dir --upgrade "pip<21.0" "setuptools<51.0"; \
+    fi; \
+    PIP_FLAGS=""; \
     if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then \
       PIP_FLAGS="--break-system-packages"; \
     fi; \
-    pip3 install --no-cache-dir $PIP_FLAGS "kas==${KAS_VERSION}"
+    pip3 install --no-cache-dir $PIP_FLAGS "kas==${KV}"
 
 RUN git config --system user.name "kas" \
  && git config --system user.email "kas@container" \
