@@ -25,9 +25,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       xz-utils debianutils iputils-ping python3-git python3-jinja2 \
       python3-subunit zstd liblz4-tool file locales libacl1 \
       python3-newt lsb-release \
-      ca-certificates sudo vim less bzip2 lz4 rsync \
+      ca-certificates sudo vim less bzip2 rsync \
  && sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
  && locale-gen en_US.UTF-8
+
+# 'lz4' binary package: split from 'liblz4-tool' in 20.04. On 18.04 only
+# liblz4-tool exists; on 20.04+ install lz4 too (both provide the CLI).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    if [ "${UBUNTU_VERSION}" != "18.04" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends lz4; \
+    fi
 
 # 24.04+ ships a stock 'ubuntu' user squatting on UID 1000
 RUN if id -u ubuntu >/dev/null 2>&1 && [ "$(id -u ubuntu)" = "1000" ]; then \
