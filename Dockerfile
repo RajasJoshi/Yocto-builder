@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       chrpath socat cpio python3 python3-pip python3-pexpect \
       xz-utils debianutils iputils-ping python3-git python3-jinja2 \
       python3-subunit zstd liblz4-tool file locales libacl1 \
-      python3-newt lsb-release \
+      python3-newt lsb-release openssh-client \
       ca-certificates sudo vim less bzip2 rsync \
  && sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
  && locale-gen en_US.UTF-8
@@ -35,6 +35,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     if [ "${UBUNTU_VERSION}" != "18.04" ]; then \
       apt-get update && apt-get install -y --no-install-recommends lz4; \
+    fi
+
+# Python 2.7 for pre-dunfell recipes that invoke python-native / python2.
+# 18.04 only: python-minimal provides the unversioned /usr/bin/python symlink
+# that old bitbake host-tooling checks for. Dropped from 20.04+.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    if [ "${UBUNTU_VERSION}" = "18.04" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        python2.7 python-minimal; \
     fi
 
 # 24.04+ ships a stock 'ubuntu' user squatting on UID 1000

@@ -22,6 +22,11 @@ Usage: $(basename "$0") [-u VERSION] [-w DIR] [-c DIR] [-p] [-- CMD...]
 
 Env overrides: YOCTO_IMAGE, YOCTO_UBUNTU, YOCTO_WORKDIR, YOCTO_CACHE
 
+SSH: if \$HOME/.ssh exists it is mounted read-only at /home/yocto/.ssh
+(gives the container your keys, known_hosts, and config). If an ssh-agent
+is running (\$SSH_AUTH_SOCK set), it is forwarded too — needed for
+passphrase-protected keys used by non-interactive bitbake fetches.
+
 Proxy vars (http_proxy, https_proxy, no_proxy, ftp_proxy) are forwarded
 automatically when set.
 
@@ -61,6 +66,14 @@ for v in http_proxy https_proxy ftp_proxy no_proxy \
   [[ -n "${!v:-}" ]] && PROXY_ARGS+=(-e "$v=${!v}")
 done
 
+SSH_ARGS=()
+if [[ -d "$HOME/.ssh" ]]; then
+  SSH_ARGS+=(-v "$HOME/.ssh:/home/yocto/.ssh:ro")
+fi
+if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
+  SSH_ARGS+=(-v "$SSH_AUTH_SOCK:/ssh-agent" -e SSH_AUTH_SOCK=/ssh-agent)
+fi
+
 TTY_ARGS=()
 [[ -t 0 && -t 1 ]] && TTY_ARGS+=(-it)
 
@@ -73,5 +86,6 @@ exec docker run --rm "${TTY_ARGS[@]}" \
   -e SSTATE_DIR=/sstate \
   -e BB_ENV_PASSTHROUGH_ADDITIONS="DL_DIR SSTATE_DIR http_proxy https_proxy ftp_proxy no_proxy" \
   "${PROXY_ARGS[@]}" \
+  "${SSH_ARGS[@]}" \
   -w /workdir \
   "$TAG" "$@"
