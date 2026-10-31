@@ -34,7 +34,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # Not required by Yocto and may be missing or renamed on newer releases, so
 # install only where available. 25.10+ defaults to Rust uutils coreutils;
-# Yocto's host tools are tested against GNU coreutils, so switch back.
+# Yocto's host tools are tested against GNU coreutils, so switch back. The
+# two conflict and uutils is essential: apt 3's solver won't drop it on its
+# own, so remove it explicitly in the same transaction (trailing '-').
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && PKGS="" \
@@ -43,7 +45,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     done \
  && if [ -n "$PKGS" ]; then apt-get install -y --no-install-recommends $PKGS; fi \
  && if apt-cache show coreutils-from-gnu >/dev/null 2>&1; then \
-      apt-get install -y --no-install-recommends --allow-remove-essential coreutils-from-gnu; \
+      apt-get install -y --no-install-recommends --allow-remove-essential \
+        coreutils-from-gnu coreutils-from-uutils-; \
     fi
 
 # lz4 CLI: only 'liblz4-tool' exists on 18.04; 20.04 split out 'lz4' and
