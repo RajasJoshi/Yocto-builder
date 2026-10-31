@@ -8,22 +8,31 @@ on:
     - cron: '0 4 * * 1'
   workflow_dispatch:
 
+# Serialize runs per ref so a scheduled rebuild and a push can't overwrite
+# each other's tags out of order. Superseded PR runs are cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
+  TEST_TAG: yocto-builder:test
 
 jobs:
   versions:
     runs-on: ubuntu-latest
     outputs:
       ubuntu: ${{ steps.load.outputs.ubuntu }}
+      default: ${{ steps.load.outputs.default }}
       kas: ${{ steps.load.outputs.kas }}
       image: ${{ steps.load.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: load
         run: |
           set -a; source versions.env; set +a
           echo "ubuntu=$(jq -cRn '$v | split(",")' --arg v "$UBUNTU_VERSIONS")" >> "$GITHUB_OUTPUT"
+          echo "default=$DEFAULT_UBUNTU" >> "$GITHUB_OUTPUT"
           echo "kas=$KAS_VERSION" >> "$GITHUB_OUTPUT"
           echo "image=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
@@ -38,11 +47,11 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
           registry: ${{ env.REGISTRY }}
@@ -56,44 +65,25 @@ jobs:
           tags: |
             type=raw,value=ubuntu-${{ matrix.ubuntu }}
             type=raw,value=ubuntu-${{ matrix.ubuntu }}-{{sha}}
-            type=raw,value=latest,enable=${{ matrix.ubuntu == '22.04' }}
+            type=raw,value=latest,enable=${{ matrix.ubuntu == needs.versions.outputs.default }}
 
-      - uses: docker/build-push-action@v7
+      # Build and load locally first; push only after the tests below pass.
+      - name: Build
+        uses: docker/build-push-action@v7
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          load: true
           platforms: linux/amd64
           build-args: |
             UBUNTU_VERSION=${{ matrix.ubuntu }}
             KAS_VERSION=${{ needs.versions.outputs.kas }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.TEST_TAG }}
           cache-from: type=gha,scope=ubuntu-${{ matrix.ubuntu }}
           cache-to: type=gha,mode=max,scope=ubuntu-${{ matrix.ubuntu }}
 
-  smoke:
-    needs: [versions, build]
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ubuntu: ${{ fromJSON(needs.versions.outputs.ubuntu) }}
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Smoke test
         run: |
-          IMAGE=${{ env.REGISTRY }}/${{ needs.versions.outputs.image }}:ubuntu-${{ matrix.ubuntu }}
-          docker run --rm "$IMAGE" -c '
+          docker run --rm "$TEST_TAG" -c '
             set -euo pipefail
             echo "user: $(id -un) uid: $(id -u)"
             [ "$(id -u)" -ne 0 ] || { echo "FAIL: running as root"; exit 1; }
@@ -105,5 +95,35 @@ jobs:
             git --version
             locale | grep -q "LANG=en_US.UTF-8" || { echo "FAIL: locale"; exit 1; }
             [ -w /workdir ] || { echo "FAIL: /workdir not writable"; exit 1; }
+            ls --version | grep -q "GNU coreutils" || { echo "FAIL: not GNU coreutils"; exit 1; }
             echo "OK"
           '
+
+      - name: UID remap test
+        run: |
+          docker run --rm -u 0:0 -e YOCTO_UID=1234 -e YOCTO_GID=1234 "$TEST_TAG" -c '
+            set -euo pipefail
+            [ "$(id -u)" = 1234 ] && [ "$(id -g)" = 1234 ] || { echo "FAIL: uid/gid $(id -u):$(id -g)"; exit 1; }
+            [ "$(id -un)" = yocto ] || { echo "FAIL: no passwd entry"; exit 1; }
+            [ "$HOME" = /home/yocto ] && [ -w "$HOME" ] || { echo "FAIL: HOME"; exit 1; }
+            sudo -n true || { echo "FAIL: sudo"; exit 1; }
+            echo "OK"
+          '
+          if docker run --rm -u 0:0 -e YOCTO_UID=0 "$TEST_TAG" -c true; then
+            echo "FAIL: root was allowed"; exit 1
+          fi
+
+      # Same inputs as the build step, so this is served from the build cache.
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            UBUNTU_VERSION=${{ matrix.ubuntu }}
+            KAS_VERSION=${{ needs.versions.outputs.kas }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=ubuntu-${{ matrix.ubuntu }}
